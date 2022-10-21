@@ -5,6 +5,7 @@
 // 4.实现<scheduler>调度器功能，副作用函数的触发权通过回调传给用户执行
 // 5.实现<lazy>功能，不执行<effectFn>函数，作为调用<effect>函数的返回值交由用户
 // 6.实现<computed>函数，<lazy>和<scheduler>的结合使用，脏值缓存计算
+// 7.实现<wacth>函数
 (function (factory) {
     if (typeof module === "object" && typeof module.exports === "object") {
         var v = factory(require, exports);
@@ -16,9 +17,54 @@
 })(function (require, exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    exports.computed = exports.effect = void 0;
     var effectStack = [];
     var activeEffect;
+    function computed(getter) {
+        var temp, dirty = true;
+        // 利用scheduler手动进行触发副作用函数
+        var effecFn = effect(getter, {
+            lazy: true,
+            scheduler: function (fn) {
+                if (!dirty) {
+                    dirty = true;
+                    trigger();
+                }
+            },
+        });
+        var obj = {
+            get value() {
+                if (dirty) {
+                    temp = effecFn();
+                    dirty = false;
+                }
+                // 每次访问value时手动追踪依赖
+                track();
+                return temp;
+            },
+        };
+        return obj.value;
+    }
+    function watch(source, cb, options) {
+        var getter = typeof source === 'function' ? source : function () { return traverse(source); }, newVal, oldVal;
+        var job = function () {
+            newVal = effectFn();
+            cb(oldVal, newVal);
+            oldVal = newVal;
+        };
+        var effectFn = effect(getter, {
+            lazy: true,
+            scheduler: function () {
+                if (options.flush === 'post') {
+                    var p = Promise.resolve();
+                    p.then(job);
+                }
+                else if (options.flush === 'sync') {
+                    job();
+                }
+            },
+        });
+        options.immediate ? effectFn() : (oldVal = effectFn());
+    }
     function effect(fn, options) {
         var result;
         var effectFn = function () {
@@ -36,31 +82,6 @@
             return effectFn;
         effectFn();
     }
-    exports.effect = effect;
-    function computed(getter) {
-        var temp, dirty = true;
-        var effecFn = effect(getter, {
-            lazy: true,
-            scheduler: function (fn) {
-                if (!dirty) {
-                    dirty = true;
-                    trigger();
-                }
-            },
-        });
-        var obj = {
-            get value() {
-                if (dirty) {
-                    temp = effecFn();
-                    dirty = false;
-                    track();
-                }
-                return temp;
-            },
-        };
-        return obj.value;
-    }
-    exports.computed = computed;
     /** 清除重更新后的副作用关联*/
     function cleanup(fn) {
         for (var i = 0; i < fn.deps.length; i++) {
@@ -71,4 +92,14 @@
     }
     function track() { }
     function trigger() { }
+    function traverse(value, seen) {
+        if (seen === void 0) { seen = new Set(); }
+        if (typeof value !== 'object' || value === null || seen.has(value))
+            return;
+        seen.add(value);
+        for (var key in value) {
+            traverse(value[key], seen);
+        }
+        return value;
+    }
 });
