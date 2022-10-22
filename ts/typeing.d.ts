@@ -1,5 +1,9 @@
 export type AnyFn = () => any;
 
+type Bucket = Map<Key, Set<EffectFn>>;
+
+type Key = string | number;
+
 type EffectFn = {
   (): any;
   deps: Set<EffectFn>[];
