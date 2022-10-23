@@ -149,3 +149,19 @@ function traverse(value: any, seen = new Set()) {
   }
   return value;
 }
+
+function jobQueue(job: EffectFn) {
+  const p = Promise.resolve();
+  const stack = new Set<EffectFn>();
+  let flush = true;
+  if (!flush) return;
+  p.then(() => {
+    stack.add(job);
+  }).finally(() => {
+    flush = true;
+  });
+  return () => {
+    stack.forEach(fn => fn());
+    stack.clear();
+  };
+}
