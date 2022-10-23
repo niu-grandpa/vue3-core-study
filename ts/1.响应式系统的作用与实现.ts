@@ -111,9 +111,17 @@ function watch(source: any, cb: WatchHookCallback, options: WatchHookOptions) {
     newVal: any,
     oldVal: any;
 
+  let cleanup: AnyFn | undefined;
+  const onInvalidate = (fn: AnyFn) => {
+    // 存储过期回调
+    cleanup = fn;
+  };
+
   const job = () => {
     newVal = effectFn();
-    cb(oldVal, newVal);
+    // 在调用监听函数之前先执行上一次的过期回调
+    cleanup && cleanup();
+    cb(oldVal, newVal, onInvalidate);
     oldVal = newVal;
   };
 
@@ -157,6 +165,7 @@ function jobQueue(job: EffectFn) {
   if (!flush) return;
   p.then(() => {
     stack.add(job);
+    flush = false;
   }).finally(() => {
     flush = true;
   });

@@ -15,7 +15,7 @@ interface EffectOptions {
   scheduler?: (fn: AnyFn) => void;
 }
 
-type WatchHookCallback = (oldVal: any, newVal: any) => void;
+type WatchHookCallback = (oldVal: any, newVal: any, onInvalidate: (fn: AnyFn) => any) => void;
 
 interface WatchHookOptions {
   immediate?: boolean;
