@@ -17,53 +17,41 @@
 })(function (require, exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
+    var bucket = new WeakMap();
     var effectStack = [];
     var activeEffect;
-    function computed(getter) {
-        var temp, dirty = true;
-        // 利用scheduler手动进行触发副作用函数
-        var effecFn = effect(getter, {
-            lazy: true,
-            scheduler: function (fn) {
-                if (!dirty) {
-                    dirty = true;
-                    trigger();
-                }
-            },
-        });
-        var obj = {
-            get value() {
-                if (dirty) {
-                    temp = effecFn();
-                    dirty = false;
-                }
-                // 每次访问value时手动追踪依赖
-                track();
-                return temp;
-            },
-        };
-        return obj.value;
+    function track(target, key) {
+        if (!activeEffect)
+            return;
+        var depsMap = bucket.get(target);
+        if (!depsMap)
+            bucket.set(target, (depsMap = new Map()));
+        var deps = depsMap.get(key);
+        if (!deps)
+            depsMap.set(key, (deps = new Set()));
+        deps.add(activeEffect);
+        activeEffect.deps.push(deps);
     }
-    function watch(source, cb, options) {
-        var getter = typeof source === 'function' ? source : function () { return traverse(source); }, newVal, oldVal;
-        var job = function () {
-            newVal = effectFn();
-            cb(oldVal, newVal);
-            oldVal = newVal;
-        };
-        var effectFn = effect(getter, {
-            lazy: true,
-            scheduler: function () {
-                if (options.flush === 'post') {
-                    var p = Promise.resolve();
-                    p.then(job);
-                }
-                else if (options.flush === 'sync') {
-                    job();
-                }
-            },
+    function trigger(target, key) {
+        var depsMap = bucket.get(target);
+        if (!depsMap)
+            return;
+        var effects = depsMap.get(key);
+        var effectsToRun = new Set();
+        effects &&
+            effects.forEach(function (effectFn) {
+                if (effectFn !== activeEffect)
+                    effectsToRun.add(effectFn);
+            });
+        effectsToRun.forEach(function (effectFn) {
+            var _a;
+            if ((_a = effectFn.options) === null || _a === void 0 ? void 0 : _a.scheduler) {
+                effectFn.options.scheduler(effectFn);
+            }
+            else {
+                effectFn();
+            }
         });
-        options.immediate ? effectFn() : (oldVal = effectFn());
     }
     function effect(fn, options) {
         var result;
@@ -82,6 +70,59 @@
             return effectFn;
         effectFn();
     }
+    function computed(getter) {
+        var temp, dirty = true;
+        // 利用scheduler手动进行触发副作用函数
+        var effecFn = effect(getter, {
+            lazy: true,
+            scheduler: function (fn) {
+                if (!dirty) {
+                    dirty = true;
+                    trigger(obj, 'value');
+                }
+            },
+        });
+        var obj = {
+            get value() {
+                if (dirty) {
+                    temp = effecFn();
+                    dirty = false;
+                }
+                // 每次访问value时手动追踪依赖
+                track(obj, 'value');
+                return temp;
+            },
+        };
+        return obj.value;
+    }
+    function watch(source, cb, options) {
+        var getter = typeof source === 'function' ? source : function () { return traverse(source); }, newVal, oldVal;
+        var cleanup;
+        var onInvalidate = function (fn) {
+            // 存储过期回调
+            cleanup = fn;
+        };
+        var job = function () {
+            newVal = effectFn();
+            // 在调用监听函数之前先执行上一次的过期回调
+            cleanup && cleanup();
+            cb(oldVal, newVal, onInvalidate);
+            oldVal = newVal;
+        };
+        var effectFn = effect(getter, {
+            lazy: true,
+            scheduler: function () {
+                if (options.flush === 'post') {
+                    var p = Promise.resolve();
+                    p.then(job);
+                }
+                else if (options.flush === 'sync') {
+                    job();
+                }
+            },
+        });
+        options.immediate ? effectFn() : (oldVal = effectFn());
+    }
     /** 清除重更新后的副作用关联*/
     function cleanup(fn) {
         for (var i = 0; i < fn.deps.length; i++) {
@@ -90,8 +131,6 @@
         }
         fn.deps = [];
     }
-    function track() { }
-    function trigger() { }
     function traverse(value, seen) {
         if (seen === void 0) { seen = new Set(); }
         if (typeof value !== 'object' || value === null || seen.has(value))
@@ -101,5 +140,22 @@
             traverse(value[key], seen);
         }
         return value;
+    }
+    function jobQueue(job) {
+        var p = Promise.resolve();
+        var stack = new Set();
+        var flush = true;
+        if (!flush)
+            return;
+        p.then(function () {
+            stack.add(job);
+            flush = false;
+        }).finally(function () {
+            flush = true;
+        });
+        return function () {
+            stack.forEach(function (fn) { return fn(); });
+            stack.clear();
+        };
     }
 });
