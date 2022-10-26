@@ -1,6 +1,6 @@
 export type AnyFn = () => any;
 
-type Bucket = Map<Key, Set<EffectFn>>;
+type Bucket = Map<Key | Symbol, Set<EffectFn>>;
 
 type Key = string | number;
 
@@ -20,4 +20,10 @@ type WatchHookCallback = (oldVal: any, newVal: any, onInvalidate: (fn: AnyFn) =>
 interface WatchHookOptions {
   immediate?: boolean;
   flush?: 'pre' | 'post' | 'sync';
+}
+
+enum TriggerType {
+  SET = 'SET',
+  ADD = 'ADD',
+  DELETE = 'DELETE',
 }

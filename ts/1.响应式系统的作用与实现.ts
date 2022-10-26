@@ -7,12 +7,14 @@
 // 6.实现<computed>函数，<lazy>和<scheduler>的结合使用，脏值缓存计算
 // 7.实现<wacth>函数
 
+import { ITERATE_KEY } from './2. 理解Proxy和Reflect';
 import {
   AnyFn,
   Bucket,
   EffectFn,
   EffectOptions,
   Key,
+  TriggerType,
   WatchHookCallback,
   WatchHookOptions,
 } from './typeing';
@@ -21,7 +23,7 @@ const bucket = new WeakMap<object, Bucket>();
 const effectStack: EffectFn[] = [];
 let activeEffect: EffectFn | undefined;
 
-function track(target: object, key: Key) {
+export function track(target: object, key: Key) {
   if (!activeEffect) return;
   let depsMap = bucket.get(target);
   if (!depsMap) bucket.set(target, (depsMap = new Map()));
@@ -31,17 +33,23 @@ function track(target: object, key: Key) {
   activeEffect.deps.push(deps);
 }
 
-function trigger(target: object, key: Key) {
+export function trigger(target: object, key: Key, type?: TriggerType) {
   const depsMap = bucket.get(target);
   if (!depsMap) return;
 
   const effects = depsMap.get(key);
   const effectsToRun = new Set<EffectFn>();
 
-  effects &&
-    effects.forEach(effectFn => {
-      if (effectFn !== activeEffect) effectsToRun.add(effectFn);
-    });
+  effects?.forEach(effectFn => {
+    if (effectFn !== activeEffect) effectsToRun.add(effectFn);
+  });
+
+  // 当操作类型为ADD或DELETE时，需要触发与ITERATE_KEY相关联的副作用函数重新执行
+  // 场景：代理对象添加或删除键时，要重新触发副作用函数内的迭代
+  if (type === 'ADD' || type === 'DELETE') {
+    const iterateEffects = depsMap.get(ITERATE_KEY);
+    iterateEffects?.forEach(fn => fn !== activeEffect && effectsToRun.add(fn));
+  }
 
   effectsToRun.forEach(effectFn => {
     if (effectFn.options?.scheduler) {
